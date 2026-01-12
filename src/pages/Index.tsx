@@ -83,6 +83,7 @@ const Index = () => {
               <Button
                 variant="outline"
                 size="lg"
+                onClick={() => navigate('/plan')}
                 className="w-full sm:w-auto h-14 px-8 text-lg"
               >
                 <MapPin className="w-5 h-5 mr-2" />
