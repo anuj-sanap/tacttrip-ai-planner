@@ -19,11 +19,20 @@ const Navbar = () => {
             </div>
           </Link>
           
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center gap-1 text-sm text-muted-foreground">
+          <div className="flex items-center gap-6">
+            <Link 
+              to="/destinations" 
+              className="hidden md:flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               <MapPin className="w-4 h-4" />
-              <span>Smart Travel Planning</span>
-            </div>
+              <span>Destinations</span>
+            </Link>
+            <Link 
+              to="/plan" 
+              className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+            >
+              Plan Trip
+            </Link>
           </div>
         </div>
       </div>

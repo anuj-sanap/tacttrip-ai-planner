@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, MapPin, Wallet, Zap, Scale, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,15 @@ const TravelForm = ({ onSubmit, isLoading }: TravelFormProps) => {
     endDate: '',
     preference: 'balanced',
   });
+
+  // Check for prefilled destination from Destinations page
+  useEffect(() => {
+    const prefilledDestination = sessionStorage.getItem('prefilledDestination');
+    if (prefilledDestination) {
+      setFormData(prev => ({ ...prev, destination: prefilledDestination }));
+      sessionStorage.removeItem('prefilledDestination');
+    }
+  }, []);
 
   const [errors, setErrors] = useState<Partial<Record<keyof TravelInput, string>>>({});
 
