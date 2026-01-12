@@ -1,0 +1,135 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface PlaceResult {
+  id: string;
+  name: string;
+  description: string;
+  type: 'attraction' | 'food' | 'shopping';
+  category?: string;
+  image: string;
+  rating?: number;
+  address?: string;
+}
+
+serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { city, type } = await req.json();
+    
+    if (!city) {
+      return new Response(
+        JSON.stringify({ error: 'City is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+    
+    if (!apiKey) {
+      console.error('GOOGLE_PLACES_API_KEY not configured');
+      return new Response(
+        JSON.stringify({ error: 'Places API not configured' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Fetching places for city: ${city}, type: ${type}`);
+
+    // Map our type to Google Places types
+    let placeType = 'tourist_attraction';
+    let ourType: 'attraction' | 'food' | 'shopping' = 'attraction';
+    
+    if (type === 'food') {
+      placeType = 'restaurant';
+      ourType = 'food';
+    } else if (type === 'shopping') {
+      placeType = 'shopping_mall';
+      ourType = 'shopping';
+    }
+
+    // First, get city coordinates using Text Search
+    const textSearchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(city)}&key=${apiKey}`;
+    const geoResponse = await fetch(textSearchUrl);
+    const geoData = await geoResponse.json();
+
+    if (geoData.status !== 'OK' || !geoData.results?.[0]) {
+      console.error('Failed to geocode city:', geoData.status);
+      return new Response(
+        JSON.stringify({ error: 'Could not find city location' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const location = geoData.results[0].geometry.location;
+    console.log(`City coordinates: ${location.lat}, ${location.lng}`);
+
+    // Now search for places near the city
+    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.lat},${location.lng}&radius=10000&type=${placeType}&key=${apiKey}`;
+    const placesResponse = await fetch(placesUrl);
+    const placesData = await placesResponse.json();
+
+    if (placesData.status !== 'OK') {
+      console.error('Places API error:', placesData.status);
+      return new Response(
+        JSON.stringify({ places: [] }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`Found ${placesData.results?.length || 0} places`);
+
+    // Transform results
+    const places: PlaceResult[] = (placesData.results || []).slice(0, 6).map((place: any, index: number) => {
+      // Get photo URL if available
+      let imageUrl = 'https://images.unsplash.com/photo-1518684079-3c830dcef090?w=400';
+      
+      if (place.photos && place.photos.length > 0) {
+        const photoRef = place.photos[0].photo_reference;
+        imageUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photoRef}&key=${apiKey}`;
+      }
+
+      // Determine category based on type
+      let category: string | undefined;
+      if (ourType === 'food') {
+        const types = place.types || [];
+        if (types.includes('cafe')) category = 'Café';
+        else if (types.includes('bar')) category = 'Bar';
+        else if (types.includes('bakery')) category = 'Bakery';
+        else category = 'Restaurant';
+      }
+
+      return {
+        id: `${ourType}-${place.place_id || index}`,
+        name: place.name,
+        description: place.vicinity || `Popular ${ourType} in ${city}`,
+        type: ourType,
+        category: category,
+        image: imageUrl,
+        rating: place.rating,
+        address: place.vicinity,
+      };
+    });
+
+    return new Response(
+      JSON.stringify({ places }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('Error in get-places function:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return new Response(
+      JSON.stringify({ error: errorMessage }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});

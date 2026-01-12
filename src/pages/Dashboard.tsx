@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plane, Building, RefreshCw, Download, Share2 } from 'lucide-react';
+import { ArrowLeft, Plane, Building, RefreshCw, Download, Share2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
@@ -12,11 +12,23 @@ import ExperienceSection from '@/components/ExperienceSection';
 import LoadingState from '@/components/LoadingState';
 import { TravelInput, TravelPlan } from '@/types/travel';
 import { generateTravelPlan } from '@/utils/aiLogic';
+import { useRealTimeData } from '@/hooks/useRealTimeData';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [travelPlan, setTravelPlan] = useState<TravelPlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [destination, setDestination] = useState('');
+
+  // Fetch real-time data
+  const { 
+    weather: realTimeWeather, 
+    attractions: realTimeAttractions, 
+    food: realTimeFood, 
+    shopping: realTimeShopping,
+    isLoading: isRealTimeLoading,
+    refetch: refetchRealTimeData
+  } = useRealTimeData(destination);
 
   useEffect(() => {
     // Get travel input from sessionStorage
@@ -28,8 +40,9 @@ const Dashboard = () => {
     }
 
     const input: TravelInput = JSON.parse(storedInput);
+    setDestination(input.destination);
     
-    // Simulate AI processing
+    // Generate travel plan
     const timer = setTimeout(() => {
       const plan = generateTravelPlan(input);
       setTravelPlan(plan);
@@ -48,7 +61,13 @@ const Dashboard = () => {
     return <LoadingState />;
   }
 
-  const { input, transport, hotels, attractions, food, shopping, weather, budget } = travelPlan;
+  // Use real-time data when available, fallback to generated data
+  const displayWeather = realTimeWeather || travelPlan.weather;
+  const displayAttractions = realTimeAttractions.length > 0 ? realTimeAttractions : travelPlan.attractions;
+  const displayFood = realTimeFood.length > 0 ? realTimeFood : travelPlan.food;
+  const displayShopping = realTimeShopping.length > 0 ? realTimeShopping : travelPlan.shopping;
+
+  const { input, transport, hotels, budget } = travelPlan;
 
   const calculateDays = (): number => {
     if (!input.startDate || !input.endDate) return 3;
@@ -94,6 +113,20 @@ const Dashboard = () => {
                 <Download className="w-4 h-4" />
                 Export
               </Button>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2"
+                onClick={refetchRealTimeData}
+                disabled={isRealTimeLoading}
+              >
+                {isRealTimeLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                Refresh Data
+              </Button>
               <Button onClick={handleNewPlan} size="sm" className="gap-2 gradient-hero">
                 <RefreshCw className="w-4 h-4" />
                 New Plan
@@ -137,9 +170,9 @@ const Dashboard = () => {
               {/* Experiences Section */}
               <section className="animate-slide-up" style={{ animationDelay: '0.2s' }}>
                 <ExperienceSection
-                  attractions={attractions}
-                  food={food}
-                  shopping={shopping}
+                  attractions={displayAttractions}
+                  food={displayFood}
+                  shopping={displayShopping}
                   destination={input.destination}
                 />
               </section>
@@ -149,7 +182,14 @@ const Dashboard = () => {
             <div className="space-y-6">
               {/* Weather Widget */}
               <div className="animate-slide-up" style={{ animationDelay: '0.15s' }}>
-                <WeatherWidget weather={weather} destination={input.destination} />
+                <div className="relative">
+                  {isRealTimeLoading && (
+                    <div className="absolute inset-0 bg-background/50 rounded-xl flex items-center justify-center z-10">
+                      <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                    </div>
+                  )}
+                  <WeatherWidget weather={displayWeather} destination={input.destination} />
+                </div>
               </div>
 
               {/* Budget Summary */}

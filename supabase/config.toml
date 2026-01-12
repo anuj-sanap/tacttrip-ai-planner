@@ -1,1 +1,7 @@
 project_id = "jpknvywropxpshctygwp"
+
+[functions.get-weather]
+verify_jwt = false
+
+[functions.get-places]
+verify_jwt = false
