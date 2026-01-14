@@ -10,15 +10,19 @@ import WeatherWidget from '@/components/WeatherWidget';
 import BudgetSummary from '@/components/BudgetSummary';
 import ExperienceSection from '@/components/ExperienceSection';
 import LoadingState from '@/components/LoadingState';
-import { TravelInput, TravelPlan } from '@/types/travel';
+import { TravelInput, TravelPlan, TransportOption } from '@/types/travel';
 import { generateTravelPlan } from '@/utils/aiLogic';
 import { useRealTimeData } from '@/hooks/useRealTimeData';
+import { useTransportData } from '@/hooks/useTransportData';
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [travelPlan, setTravelPlan] = useState<TravelPlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [source, setSource] = useState('');
   const [destination, setDestination] = useState('');
+  const [preference, setPreference] = useState<'cheapest' | 'fastest' | 'balanced'>('balanced');
+  const [budget, setBudget] = useState(0);
 
   // Fetch real-time data
   const { 
@@ -30,6 +34,14 @@ const Dashboard = () => {
     refetch: refetchRealTimeData
   } = useRealTimeData(destination);
 
+  // Fetch real-time transport options
+  const {
+    transport: realTimeTransport,
+    route: transportRoute,
+    isLoading: isTransportLoading,
+    refetch: refetchTransport
+  } = useTransportData(source, destination);
+
   useEffect(() => {
     // Get travel input from sessionStorage
     const storedInput = sessionStorage.getItem('travelInput');
@@ -40,7 +52,10 @@ const Dashboard = () => {
     }
 
     const input: TravelInput = JSON.parse(storedInput);
+    setSource(input.source);
     setDestination(input.destination);
+    setPreference(input.preference);
+    setBudget(input.budget);
     
     // Generate travel plan
     const timer = setTimeout(() => {
@@ -57,17 +72,74 @@ const Dashboard = () => {
     navigate('/plan');
   };
 
+  const handleRefreshAll = () => {
+    refetchRealTimeData();
+    refetchTransport();
+  };
+
   if (isLoading || !travelPlan) {
     return <LoadingState />;
   }
+
+  // Process and recommend transport options based on preference
+  const processTransportOptions = (options: TransportOption[]): TransportOption[] => {
+    if (options.length === 0) return [];
+    
+    const sorted = [...options];
+    
+    if (preference === 'cheapest') {
+      sorted.sort((a, b) => a.cost - b.cost);
+    } else if (preference === 'fastest') {
+      sorted.sort((a, b) => {
+        const getDurationMinutes = (duration: string) => {
+          const parts = duration.match(/(\d+)h\s*(\d+)?m?/);
+          if (!parts) return 0;
+          return parseInt(parts[1]) * 60 + (parseInt(parts[2]) || 0);
+        };
+        return getDurationMinutes(a.duration) - getDurationMinutes(b.duration);
+      });
+    } else {
+      sorted.sort((a, b) => {
+        const getDurationMinutes = (duration: string) => {
+          const parts = duration.match(/(\d+)h\s*(\d+)?m?/);
+          if (!parts) return 0;
+          return parseInt(parts[1]) * 60 + (parseInt(parts[2]) || 0);
+        };
+        const scoreA = a.cost * 0.6 + getDurationMinutes(a.duration) * 10;
+        const scoreB = b.cost * 0.6 + getDurationMinutes(b.duration) * 10;
+        return scoreA - scoreB;
+      });
+    }
+    
+    const recommended = sorted[0];
+    let reason = '';
+    if (preference === 'cheapest') {
+      reason = 'Recommended for lowest cost within your budget';
+    } else if (preference === 'fastest') {
+      reason = 'Recommended for quickest travel time';
+    } else {
+      reason = 'Best balance of cost and travel time';
+    }
+    
+    // Filter by budget and mark recommended
+    const maxTransportBudget = budget * 0.4;
+    return sorted.map(option => ({
+      ...option,
+      isRecommended: option.id === recommended.id && option.cost <= maxTransportBudget,
+      reason: option.id === recommended.id && option.cost <= maxTransportBudget ? reason : undefined,
+    }));
+  };
 
   // Use real-time data when available, fallback to generated data
   const displayWeather = realTimeWeather || travelPlan.weather;
   const displayAttractions = realTimeAttractions.length > 0 ? realTimeAttractions : travelPlan.attractions;
   const displayFood = realTimeFood.length > 0 ? realTimeFood : travelPlan.food;
   const displayShopping = realTimeShopping.length > 0 ? realTimeShopping : travelPlan.shopping;
+  const displayTransport = realTimeTransport.length > 0 
+    ? processTransportOptions(realTimeTransport) 
+    : travelPlan.transport;
 
-  const { input, transport, hotels, budget } = travelPlan;
+  const { input, hotels, budget: budgetBreakdown } = travelPlan;
 
   const calculateDays = (): number => {
     if (!input.startDate || !input.endDate) return 3;
@@ -117,10 +189,10 @@ const Dashboard = () => {
                 variant="outline" 
                 size="sm" 
                 className="gap-2"
-                onClick={refetchRealTimeData}
-                disabled={isRealTimeLoading}
+                onClick={handleRefreshAll}
+                disabled={isRealTimeLoading || isTransportLoading}
               >
-                {isRealTimeLoading ? (
+                {(isRealTimeLoading || isTransportLoading) ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <RefreshCw className="w-4 h-4" />
@@ -146,9 +218,18 @@ const Dashboard = () => {
                   Transport Options
                 </h2>
                 <div className="space-y-4">
-                  {transport.map((option) => (
-                    <TransportCard key={option.id} option={option} />
-                  ))}
+                  {isTransportLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                      <span className="ml-2 text-muted-foreground">Finding best routes...</span>
+                    </div>
+                  ) : displayTransport.length > 0 ? (
+                    displayTransport.map((option) => (
+                      <TransportCard key={option.id} option={option} />
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground text-center py-4">No transport options available for this route</p>
+                  )}
                 </div>
               </section>
 
@@ -194,7 +275,7 @@ const Dashboard = () => {
 
               {/* Budget Summary */}
               <div className="animate-slide-up sticky top-24" style={{ animationDelay: '0.2s' }}>
-                <BudgetSummary budget={budget} totalBudget={input.budget} />
+                <BudgetSummary budget={budgetBreakdown} totalBudget={input.budget} />
               </div>
             </div>
           </div>
