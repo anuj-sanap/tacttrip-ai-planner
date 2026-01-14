@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.get-places]
 verify_jwt = false
+
+[functions.get-transport]
+verify_jwt = false
