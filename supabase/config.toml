@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.get-transport]
 verify_jwt = false
+
+[functions.get-hotels]
+verify_jwt = false
