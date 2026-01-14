@@ -10,10 +10,11 @@ import WeatherWidget from '@/components/WeatherWidget';
 import BudgetSummary from '@/components/BudgetSummary';
 import ExperienceSection from '@/components/ExperienceSection';
 import LoadingState from '@/components/LoadingState';
-import { TravelInput, TravelPlan, TransportOption } from '@/types/travel';
+import { TravelInput, TravelPlan, TransportOption, HotelOption } from '@/types/travel';
 import { generateTravelPlan } from '@/utils/aiLogic';
 import { useRealTimeData } from '@/hooks/useRealTimeData';
 import { useTransportData } from '@/hooks/useTransportData';
+import { useHotelData } from '@/hooks/useHotelData';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -41,6 +42,13 @@ const Dashboard = () => {
     isLoading: isTransportLoading,
     refetch: refetchTransport
   } = useTransportData(source, destination);
+
+  // Fetch real-time hotel options
+  const {
+    hotels: realTimeHotels,
+    isLoading: isHotelsLoading,
+    refetch: refetchHotels
+  } = useHotelData(destination);
 
   useEffect(() => {
     // Get travel input from sessionStorage
@@ -75,6 +83,7 @@ const Dashboard = () => {
   const handleRefreshAll = () => {
     refetchRealTimeData();
     refetchTransport();
+    refetchHotels();
   };
 
   if (isLoading || !travelPlan) {
@@ -138,8 +147,28 @@ const Dashboard = () => {
   const displayTransport = realTimeTransport.length > 0 
     ? processTransportOptions(realTimeTransport) 
     : travelPlan.transport;
+  
+  // Process hotels - mark best value based on rating/price ratio
+  const processHotels = (hotelList: HotelOption[]): HotelOption[] => {
+    if (hotelList.length === 0) return [];
+    
+    const bestValue = hotelList.reduce((best, current) => {
+      const currentValue = current.rating / current.pricePerNight;
+      const bestValueScore = best.rating / best.pricePerNight;
+      return currentValue > bestValueScore ? current : best;
+    }, hotelList[0]);
+    
+    return hotelList.map(hotel => ({
+      ...hotel,
+      isBestValue: hotel.id === bestValue.id,
+    }));
+  };
+  
+  const displayHotels = realTimeHotels.length > 0 
+    ? processHotels(realTimeHotels) 
+    : travelPlan.hotels;
 
-  const { input, hotels, budget: budgetBreakdown } = travelPlan;
+  const { input, budget: budgetBreakdown } = travelPlan;
 
   const calculateDays = (): number => {
     if (!input.startDate || !input.endDate) return 3;
@@ -190,9 +219,9 @@ const Dashboard = () => {
                 size="sm" 
                 className="gap-2"
                 onClick={handleRefreshAll}
-                disabled={isRealTimeLoading || isTransportLoading}
+                disabled={isRealTimeLoading || isTransportLoading || isHotelsLoading}
               >
-                {(isRealTimeLoading || isTransportLoading) ? (
+                {(isRealTimeLoading || isTransportLoading || isHotelsLoading) ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <RefreshCw className="w-4 h-4" />
@@ -242,9 +271,18 @@ const Dashboard = () => {
                   Accommodation Options
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {hotels.map((hotel) => (
-                    <HotelCard key={hotel.id} hotel={hotel} nights={days} />
-                  ))}
+                  {isHotelsLoading ? (
+                    <div className="col-span-2 flex items-center justify-center py-8">
+                      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                      <span className="ml-2 text-muted-foreground">Finding best hotels...</span>
+                    </div>
+                  ) : displayHotels.length > 0 ? (
+                    displayHotels.map((hotel) => (
+                      <HotelCard key={hotel.id} hotel={hotel} nights={days} />
+                    ))
+                  ) : (
+                    <p className="col-span-2 text-muted-foreground text-center py-4">No hotels found for this destination</p>
+                  )}
                 </div>
               </section>
 
