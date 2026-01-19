@@ -44,16 +44,28 @@ serve(async (req) => {
 
     console.log(`Fetching hotels for city: ${city}`);
 
-    // First, get city coordinates using Text Search
-    const textSearchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(city + ' India')}&key=${apiKey}`;
-    const geoResponse = await fetch(textSearchUrl);
+    // Use Places API (New) - Text Search
+    const textSearchUrl = 'https://places.googleapis.com/v1/places:searchText';
+    const textSearchBody = {
+      textQuery: `${city} India`,
+      maxResultCount: 1
+    };
+
+    const geoResponse = await fetch(textSearchUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.location,places.displayName'
+      },
+      body: JSON.stringify(textSearchBody)
+    });
+    
     const geoData = await geoResponse.json();
+    console.log('Geocode response:', JSON.stringify(geoData));
 
-    console.log('Geocode response status:', geoData.status, 'error_message:', geoData.error_message);
-
-    if (geoData.status !== 'OK' || !geoData.results?.[0]) {
-      console.error('Failed to geocode city:', geoData.status, geoData.error_message);
-      // Return mock hotels when API fails
+    if (!geoData.places?.[0]?.location) {
+      console.error('Failed to geocode city:', JSON.stringify(geoData));
       const mockHotels = generateMockHotels(city);
       return new Response(
         JSON.stringify({ hotels: mockHotels, source: 'mock' }),
@@ -61,46 +73,66 @@ serve(async (req) => {
       );
     }
 
-    const cityLocation = geoData.results[0].geometry.location;
-    console.log(`City coordinates: ${cityLocation.lat}, ${cityLocation.lng}`);
+    const cityLocation = geoData.places[0].location;
+    console.log(`City coordinates: ${cityLocation.latitude}, ${cityLocation.longitude}`);
 
-    // Search for hotels/lodging near the city center
-    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${cityLocation.lat},${cityLocation.lng}&radius=15000&type=lodging&key=${apiKey}`;
-    const placesResponse = await fetch(placesUrl);
-    const placesData = await placesResponse.json();
+    // Search for hotels using Places API (New) - Text Search
+    const hotelsSearchBody = {
+      textQuery: `hotels in ${city} India`,
+      maxResultCount: 10
+    };
 
-    if (placesData.status !== 'OK') {
-      console.error('Places API error:', placesData.status);
+    const hotelsResponse = await fetch(textSearchUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.rating,places.location,places.formattedAddress,places.photos,places.priceLevel'
+      },
+      body: JSON.stringify(hotelsSearchBody)
+    });
+
+    const hotelsData = await hotelsResponse.json();
+    console.log(`Found ${hotelsData.places?.length || 0} hotels`);
+
+    if (!hotelsData.places || hotelsData.places.length === 0) {
+      console.error('No hotels found:', JSON.stringify(hotelsData));
+      const mockHotels = generateMockHotels(city);
       return new Response(
-        JSON.stringify({ hotels: [], status: placesData.status }),
+        JSON.stringify({ hotels: mockHotels, source: 'mock' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Found ${placesData.results?.length || 0} hotels`);
-
     // Transform results to hotel format
-    const hotels: HotelResult[] = (placesData.results || []).slice(0, 6).map((place: any, index: number) => {
+    const hotels: HotelResult[] = hotelsData.places.slice(0, 6).map((place: any, index: number) => {
       // Get photo URL if available
       let imageUrl = 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400';
       
       if (place.photos && place.photos.length > 0) {
-        const photoRef = place.photos[0].photo_reference;
-        imageUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photoRef}&key=${apiKey}`;
+        const photoName = place.photos[0].name;
+        imageUrl = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${apiKey}`;
       }
 
-      // Calculate distance from city center (approximate)
-      const hotelLat = place.geometry?.location?.lat || cityLocation.lat;
-      const hotelLng = place.geometry?.location?.lng || cityLocation.lng;
-      const distanceKm = calculateDistance(cityLocation.lat, cityLocation.lng, hotelLat, hotelLng);
+      // Calculate distance from city center
+      const hotelLat = place.location?.latitude || cityLocation.latitude;
+      const hotelLng = place.location?.longitude || cityLocation.longitude;
+      const distanceKm = calculateDistance(cityLocation.latitude, cityLocation.longitude, hotelLat, hotelLng);
       
       // Estimate price based on rating and price_level
-      const priceLevel = place.price_level || 2;
+      const priceLevelMap: Record<string, number> = {
+        'PRICE_LEVEL_FREE': 0,
+        'PRICE_LEVEL_INEXPENSIVE': 1,
+        'PRICE_LEVEL_MODERATE': 2,
+        'PRICE_LEVEL_EXPENSIVE': 3,
+        'PRICE_LEVEL_VERY_EXPENSIVE': 4
+      };
+      const priceLevel = priceLevelMap[place.priceLevel] ?? 2;
       const rating = place.rating || 3.5;
       const basePrice = 1500 + (priceLevel * 1500) + (rating * 200);
       const pricePerNight = Math.round(basePrice + Math.random() * 500);
 
-      // Determine amenities based on types and rating
+      // Determine amenities based on rating and price
       const amenities: string[] = ['WiFi'];
       if (rating >= 4) amenities.push('Breakfast');
       if (priceLevel >= 3) amenities.push('Pool', 'Spa');
@@ -108,14 +140,14 @@ serve(async (req) => {
       if (rating >= 4.5) amenities.push('Gym');
 
       return {
-        id: `hotel-${place.place_id || index}`,
-        name: place.name,
+        id: `hotel-${place.id || index}`,
+        name: place.displayName?.text || `Hotel ${index + 1}`,
         pricePerNight,
         rating: rating || 3.5,
         distance: `${distanceKm.toFixed(1)} km from center`,
         amenities: amenities.slice(0, 4),
         image: imageUrl,
-        address: place.vicinity,
+        address: place.formattedAddress,
       };
     });
 
@@ -123,7 +155,7 @@ serve(async (req) => {
     hotels.sort((a, b) => b.rating - a.rating);
 
     return new Response(
-      JSON.stringify({ hotels }),
+      JSON.stringify({ hotels, source: 'google' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 

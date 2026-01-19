@@ -44,28 +44,40 @@ serve(async (req) => {
 
     console.log(`Fetching places for city: ${city}, type: ${type}`);
 
-    // Map our type to Google Places types
-    let placeType = 'tourist_attraction';
+    // Map our type to search queries
+    let searchQuery = `tourist attractions in ${city} India`;
     let ourType: 'attraction' | 'food' | 'shopping' = 'attraction';
     
     if (type === 'food') {
-      placeType = 'restaurant';
+      searchQuery = `restaurants in ${city} India`;
       ourType = 'food';
     } else if (type === 'shopping') {
-      placeType = 'shopping_mall';
+      searchQuery = `shopping malls in ${city} India`;
       ourType = 'shopping';
     }
 
-    // First, get city coordinates using Text Search
-    const textSearchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(city + ' India')}&key=${apiKey}`;
-    const geoResponse = await fetch(textSearchUrl);
-    const geoData = await geoResponse.json();
+    // Use Places API (New) - Text Search
+    const textSearchUrl = 'https://places.googleapis.com/v1/places:searchText';
+    const searchBody = {
+      textQuery: searchQuery,
+      maxResultCount: 10
+    };
 
-    console.log('Geocode response status:', geoData.status, 'error_message:', geoData.error_message);
+    const placesResponse = await fetch(textSearchUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.rating,places.formattedAddress,places.photos,places.types'
+      },
+      body: JSON.stringify(searchBody)
+    });
 
-    if (geoData.status !== 'OK' || !geoData.results?.[0]) {
-      console.error('Failed to geocode city:', geoData.status, geoData.error_message);
-      // Return mock places when API fails
+    const placesData = await placesResponse.json();
+    console.log(`Found ${placesData.places?.length || 0} places`);
+
+    if (!placesData.places || placesData.places.length === 0) {
+      console.error('No places found:', JSON.stringify(placesData));
       const mockPlaces = generateMockPlaces(city, ourType);
       return new Response(
         JSON.stringify({ places: mockPlaces, source: 'mock' }),
@@ -73,32 +85,14 @@ serve(async (req) => {
       );
     }
 
-    const location = geoData.results[0].geometry.location;
-    console.log(`City coordinates: ${location.lat}, ${location.lng}`);
-
-    // Now search for places near the city
-    const placesUrl = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.lat},${location.lng}&radius=10000&type=${placeType}&key=${apiKey}`;
-    const placesResponse = await fetch(placesUrl);
-    const placesData = await placesResponse.json();
-
-    if (placesData.status !== 'OK') {
-      console.error('Places API error:', placesData.status);
-      return new Response(
-        JSON.stringify({ places: [] }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    console.log(`Found ${placesData.results?.length || 0} places`);
-
     // Transform results
-    const places: PlaceResult[] = (placesData.results || []).slice(0, 6).map((place: any, index: number) => {
+    const places: PlaceResult[] = placesData.places.slice(0, 6).map((place: any, index: number) => {
       // Get photo URL if available
       let imageUrl = 'https://images.unsplash.com/photo-1518684079-3c830dcef090?w=400';
       
       if (place.photos && place.photos.length > 0) {
-        const photoRef = place.photos[0].photo_reference;
-        imageUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photoRef}&key=${apiKey}`;
+        const photoName = place.photos[0].name;
+        imageUrl = `https://places.googleapis.com/v1/${photoName}/media?maxWidthPx=400&key=${apiKey}`;
       }
 
       // Determine category based on type
@@ -112,19 +106,19 @@ serve(async (req) => {
       }
 
       return {
-        id: `${ourType}-${place.place_id || index}`,
-        name: place.name,
-        description: place.vicinity || `Popular ${ourType} in ${city}`,
+        id: `${ourType}-${place.id || index}`,
+        name: place.displayName?.text || `Place ${index + 1}`,
+        description: place.formattedAddress || `Popular ${ourType} in ${city}`,
         type: ourType,
         category: category,
         image: imageUrl,
         rating: place.rating,
-        address: place.vicinity,
+        address: place.formattedAddress,
       };
     });
 
     return new Response(
-      JSON.stringify({ places }),
+      JSON.stringify({ places, source: 'google' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
