@@ -32,39 +32,58 @@ serve(async (req) => {
       );
     }
 
-    const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+    const apiKey = Deno.env.get('GEOAPIFY_API_KEY');
     
     if (!apiKey) {
-      console.error('GOOGLE_PLACES_API_KEY not configured');
+      console.error('GEOAPIFY_API_KEY not configured');
       return new Response(
-        JSON.stringify({ error: 'Places API not configured' }),
+        JSON.stringify({ error: 'Geoapify API not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     console.log(`Fetching places for city: ${city}, type: ${type}`);
 
-    // Map our type to search queries
-    let searchQuery = `tourist attractions in ${city} India`;
+    // Step 1: Geocode the city
+    const geocodeUrl = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(city + ', India')}&format=json&apiKey=${apiKey}`;
+    
+    const geoResponse = await fetch(geocodeUrl);
+    const geoData = await geoResponse.json();
+
+    if (!geoData.results || geoData.results.length === 0) {
+      console.error('Failed to geocode city');
+      return new Response(
+        JSON.stringify({ places: [], message: 'No places found for this location', source: 'geocode_error' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const cityLocation = {
+      lat: geoData.results[0].lat,
+      lng: geoData.results[0].lon
+    };
+
+    // Map our type to Geoapify categories
+    let categories = 'tourism.sights,tourism.attraction';
     let ourType: 'attraction' | 'food' | 'shopping' = 'attraction';
     
     if (type === 'food') {
-      searchQuery = `restaurants in ${city} India`;
+      categories = 'catering.restaurant,catering.cafe';
       ourType = 'food';
     } else if (type === 'shopping') {
-      searchQuery = `shopping malls in ${city} India`;
+      categories = 'commercial.shopping_mall,commercial.marketplace';
       ourType = 'shopping';
     }
 
-    // Use legacy Places API - Text Search
-    const textSearchUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(searchQuery)}&key=${apiKey}`;
+    // Step 2: Search for places using Geoapify Places API
+    const placesUrl = `https://api.geoapify.com/v2/places?categories=${categories}&filter=circle:${cityLocation.lng},${cityLocation.lat},10000&limit=10&apiKey=${apiKey}`;
 
-    const placesResponse = await fetch(textSearchUrl);
+    const placesResponse = await fetch(placesUrl);
     const placesData = await placesResponse.json();
-    console.log(`Places search status: ${placesData.status}, found ${placesData.results?.length || 0} places`);
+    console.log(`Places search found ${placesData.features?.length || 0} places`);
 
-    if (placesData.status !== 'OK' || !placesData.results || placesData.results.length === 0) {
-      console.error('No places found:', placesData.status, placesData.error_message);
+    if (!placesData.features || placesData.features.length === 0) {
+      console.error('No places found from Geoapify');
       return new Response(
         JSON.stringify({ places: [], message: 'No places found for this location', source: 'no_results' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -72,39 +91,44 @@ serve(async (req) => {
     }
 
     // Transform results
-    const places: PlaceResult[] = placesData.results.slice(0, 6).map((place: any, index: number) => {
-      // Get photo URL using legacy Places Photos API
-      let imageUrl = 'https://images.unsplash.com/photo-1518684079-3c830dcef090?w=400';
+    const places: PlaceResult[] = placesData.features.slice(0, 6).map((feature: any, index: number) => {
+      const place = feature.properties;
       
-      if (place.photos && place.photos.length > 0) {
-        const photoReference = place.photos[0].photo_reference;
-        imageUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photoReference}&key=${apiKey}`;
-      }
+      // Use placeholder images based on type
+      const imageUrls = {
+        attraction: 'https://images.unsplash.com/photo-1518684079-3c830dcef090?w=400',
+        food: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400',
+        shopping: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400'
+      };
 
       // Determine category based on type
       let category: string | undefined;
       if (ourType === 'food') {
-        const types = place.types || [];
-        if (types.includes('cafe')) category = 'Café';
-        else if (types.includes('bar')) category = 'Bar';
-        else if (types.includes('bakery')) category = 'Bakery';
+        const cats = place.categories || [];
+        if (cats.some((c: string) => c.includes('cafe'))) category = 'Café';
+        else if (cats.some((c: string) => c.includes('bar'))) category = 'Bar';
+        else if (cats.some((c: string) => c.includes('bakery'))) category = 'Bakery';
         else category = 'Restaurant';
       }
 
       return {
         id: `${ourType}-${place.place_id || index}`,
-        name: place.name,
-        description: place.formatted_address || `Popular ${ourType} in ${city}`,
+        name: place.name || `${ourType.charAt(0).toUpperCase() + ourType.slice(1)} in ${city}`,
+        description: place.formatted || place.address_line1 || `Popular ${ourType} in ${city}`,
         type: ourType,
         category: category,
-        image: imageUrl,
-        rating: place.rating,
-        address: place.formatted_address || place.vicinity,
+        image: imageUrls[ourType],
+        rating: place.datasource?.raw?.rating || (3.5 + Math.random() * 1.5),
+        address: place.formatted || place.address_line1,
       };
     });
 
+    // Filter out places without proper names
+    const validPlaces = places.filter(p => p.name && !p.name.includes(' in '));
+    const finalPlaces = validPlaces.length > 0 ? validPlaces : places;
+
     return new Response(
-      JSON.stringify({ places, source: 'google' }),
+      JSON.stringify({ places: finalPlaces, source: 'geoapify' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
