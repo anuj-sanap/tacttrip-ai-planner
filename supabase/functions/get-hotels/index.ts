@@ -33,45 +33,48 @@ serve(async (req) => {
       );
     }
 
-    const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+    const apiKey = Deno.env.get('GEOAPIFY_API_KEY');
     
     if (!apiKey) {
-      console.error('GOOGLE_PLACES_API_KEY not configured');
+      console.error('GEOAPIFY_API_KEY not configured');
       return new Response(
-        JSON.stringify({ error: 'Places API not configured' }),
+        JSON.stringify({ error: 'Geoapify API not configured' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     console.log(`Fetching hotels for city: ${city}`);
 
-    // Step 1: Geocode the city using legacy Places API Text Search
-    const geocodeUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent(city + ' India')}&key=${apiKey}`;
+    // Step 1: Geocode the city using Geoapify Geocoding API
+    const geocodeUrl = `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(city + ', India')}&format=json&apiKey=${apiKey}`;
     
     const geoResponse = await fetch(geocodeUrl);
     const geoData = await geoResponse.json();
-    console.log('Geocode response status:', geoData.status);
+    console.log('Geocode response:', JSON.stringify(geoData).substring(0, 200));
 
-    if (geoData.status !== 'OK' || !geoData.results?.[0]?.geometry?.location) {
-      console.error('Failed to geocode city:', geoData.status, geoData.error_message);
+    if (!geoData.results || geoData.results.length === 0) {
+      console.error('Failed to geocode city');
       return new Response(
-        JSON.stringify({ hotels: [], message: 'No hotels found for this location', source: 'api_error' }),
+        JSON.stringify({ hotels: [], message: 'No hotels found for this location', source: 'geocode_error' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const cityLocation = geoData.results[0].geometry.location;
+    const cityLocation = {
+      lat: geoData.results[0].lat,
+      lng: geoData.results[0].lon
+    };
     console.log(`City coordinates: ${cityLocation.lat}, ${cityLocation.lng}`);
 
-    // Step 2: Search for hotels using legacy Places API Text Search
-    const hotelsUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodeURIComponent('hotels in ' + city + ' India')}&type=lodging&key=${apiKey}`;
+    // Step 2: Search for hotels using Geoapify Places API
+    const hotelsUrl = `https://api.geoapify.com/v2/places?categories=accommodation.hotel&filter=circle:${cityLocation.lng},${cityLocation.lat},10000&limit=20&apiKey=${apiKey}`;
     
     const hotelsResponse = await fetch(hotelsUrl);
     const hotelsData = await hotelsResponse.json();
-    console.log(`Hotels search status: ${hotelsData.status}, found ${hotelsData.results?.length || 0} hotels`);
+    console.log(`Hotels search found ${hotelsData.features?.length || 0} hotels`);
 
-    if (hotelsData.status !== 'OK' || !hotelsData.results || hotelsData.results.length === 0) {
-      console.error('No hotels found:', hotelsData.status, hotelsData.error_message);
+    if (!hotelsData.features || hotelsData.features.length === 0) {
+      console.error('No hotels found from Geoapify');
       return new Response(
         JSON.stringify({ hotels: [], message: 'No hotels found for this location', source: 'no_results' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -79,23 +82,21 @@ serve(async (req) => {
     }
 
     // Transform results to hotel format
-    const hotels: HotelResult[] = hotelsData.results.slice(0, 8).map((place: any, index: number) => {
-      // Get photo URL using legacy Places Photos API
-      let imageUrl = 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400';
+    const hotels: HotelResult[] = hotelsData.features.slice(0, 8).map((feature: any, index: number) => {
+      const place = feature.properties;
+      const coords = feature.geometry?.coordinates || [cityLocation.lng, cityLocation.lat];
       
-      if (place.photos && place.photos.length > 0) {
-        const photoReference = place.photos[0].photo_reference;
-        imageUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photo_reference=${photoReference}&key=${apiKey}`;
-      }
+      // Use placeholder image (Geoapify doesn't provide images)
+      const imageUrl = `https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400&q=80`;
 
       // Calculate distance from city center
-      const hotelLat = place.geometry?.location?.lat || cityLocation.lat;
-      const hotelLng = place.geometry?.location?.lng || cityLocation.lng;
+      const hotelLat = coords[1];
+      const hotelLng = coords[0];
       const distanceKm = calculateDistance(cityLocation.lat, cityLocation.lng, hotelLat, hotelLng);
       
-      // Estimate price based on rating and price_level
-      const priceLevel = place.price_level ?? 2;
-      const rating = place.rating || 3.5;
+      // Estimate price and rating based on available data
+      const rating = place.datasource?.raw?.stars || (3 + Math.random() * 2);
+      const priceLevel = Math.min(4, Math.floor(rating));
       const basePrice = 1500 + (priceLevel * 1500) + (rating * 200);
       const pricePerNight = Math.round(basePrice + Math.random() * 500);
 
@@ -112,22 +113,24 @@ serve(async (req) => {
 
       return {
         id: `hotel-${place.place_id || index}`,
-        name: place.name,
+        name: place.name || `Hotel in ${city}`,
         pricePerNight,
-        rating: rating,
+        rating: parseFloat(rating.toFixed(1)),
         distance: `${distanceKm.toFixed(1)} km from center`,
         amenities: amenities.slice(0, 4),
         image: imageUrl,
-        address: place.formatted_address || place.vicinity,
+        address: place.formatted || place.address_line1 || `${city}, India`,
         priceLevel: priceLevelLabel,
       };
     });
 
-    // Sort by rating
-    hotels.sort((a, b) => b.rating - a.rating);
+    // Filter out hotels without names and sort by rating
+    const validHotels = hotels.filter(h => h.name && !h.name.startsWith('Hotel in'));
+    const finalHotels = validHotels.length > 0 ? validHotels : hotels;
+    finalHotels.sort((a, b) => b.rating - a.rating);
 
     return new Response(
-      JSON.stringify({ hotels, source: 'google' }),
+      JSON.stringify({ hotels: finalHotels, source: 'geoapify' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
