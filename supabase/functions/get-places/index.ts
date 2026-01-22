@@ -90,16 +90,43 @@ serve(async (req) => {
       );
     }
 
+    // Different images for variety based on type
+    const attractionImages = [
+      'https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=400', // Taj Mahal
+      'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=400', // India Gate
+      'https://images.unsplash.com/photo-1599661046289-e31897846e41?w=400', // Hawa Mahal
+      'https://images.unsplash.com/photo-1564507592333-c60657eea523?w=400', // Temple
+      'https://images.unsplash.com/photo-1477587458883-47145ed94245?w=400', // Fort
+      'https://images.unsplash.com/photo-1602216056096-3b40cc0c9944?w=400', // Palace
+    ];
+    
+    const foodImages = [
+      'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400', // Restaurant interior
+      'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=400', // Fine dining
+      'https://images.unsplash.com/photo-1552566626-52f8b828add9?w=400', // Cafe
+      'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=400', // Plated food
+      'https://images.unsplash.com/photo-1559339352-11d035aa65de?w=400', // Indian food
+      'https://images.unsplash.com/photo-1596797038530-2c107229654b?w=400', // Street food
+    ];
+    
+    const shoppingImages = [
+      'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400', // Mall
+      'https://images.unsplash.com/photo-1555529669-e69e7aa0ba9a?w=400', // Shopping bags
+      'https://images.unsplash.com/photo-1472851294608-062f824d29cc?w=400', // Storefront
+      'https://images.unsplash.com/photo-1534452203293-494d7ddbf7e0?w=400', // Bazaar
+      'https://images.unsplash.com/photo-1583922606661-0822ed0bd916?w=400', // Market
+      'https://images.unsplash.com/photo-1607082349566-187342175e2f?w=400', // Retail
+    ];
+
+    const imagesByType = {
+      attraction: attractionImages,
+      food: foodImages,
+      shopping: shoppingImages
+    };
+
     // Transform results
     const places: PlaceResult[] = placesData.features.slice(0, 6).map((feature: any, index: number) => {
       const place = feature.properties;
-      
-      // Use placeholder images based on type
-      const imageUrls = {
-        attraction: 'https://images.unsplash.com/photo-1518684079-3c830dcef090?w=400',
-        food: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400',
-        shopping: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=400'
-      };
 
       // Determine category based on type
       let category: string | undefined;
@@ -117,7 +144,7 @@ serve(async (req) => {
         description: place.formatted || place.address_line1 || `Popular ${ourType} in ${city}`,
         type: ourType,
         category: category,
-        image: imageUrls[ourType],
+        image: imagesByType[ourType][index % imagesByType[ourType].length],
         rating: place.datasource?.raw?.rating || (3.5 + Math.random() * 1.5),
         address: place.formatted || place.address_line1,
       };
