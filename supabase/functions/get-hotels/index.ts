@@ -81,13 +81,25 @@ serve(async (req) => {
       );
     }
 
+    // Different hotel images for variety
+    const hotelImages = [
+      'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400&q=80', // Luxury pool
+      'https://images.unsplash.com/photo-1551882547-ff40c63fe5fa?w=400&q=80', // Modern hotel
+      'https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?w=400&q=80', // Resort
+      'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=400&q=80', // Hotel room
+      'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=400&q=80', // Grand hotel
+      'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=400&q=80', // Boutique hotel
+      'https://images.unsplash.com/photo-1445019980597-93fa8acb246c?w=400&q=80', // City hotel
+      'https://images.unsplash.com/photo-1564507592333-c60657eea523?w=400&q=80', // Beachside
+    ];
+
     // Transform results to hotel format
     const hotels: HotelResult[] = hotelsData.features.slice(0, 8).map((feature: any, index: number) => {
       const place = feature.properties;
       const coords = feature.geometry?.coordinates || [cityLocation.lng, cityLocation.lat];
       
-      // Use placeholder image (Geoapify doesn't provide images)
-      const imageUrl = `https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400&q=80`;
+      // Use different image for each hotel
+      const imageUrl = hotelImages[index % hotelImages.length];
 
       // Calculate distance from city center
       const hotelLat = coords[1];
