@@ -15,6 +15,9 @@ import Hotels from "./pages/Hotels";
 import Bookings from "./pages/Bookings";
 import Profile from "./pages/Profile";
 import About from "./pages/About";
+import Packages from "./pages/Packages";
+import PackageDetails from "./pages/PackageDetails";
+import BookingConfirmation from "./pages/BookingConfirmation";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -35,6 +38,13 @@ const App = () => (
             <Route path="/destinations" element={<Destinations />} />
             <Route path="/hotels" element={<Hotels />} />
             <Route path="/about" element={<About />} />
+            <Route path="/packages" element={<Packages />} />
+            <Route path="/packages/:id" element={<PackageDetails />} />
+            <Route path="/booking-confirmation/:id" element={
+              <ProtectedRoute>
+                <BookingConfirmation />
+              </ProtectedRoute>
+            } />
             <Route path="/bookings" element={
               <ProtectedRoute>
                 <Bookings />

@@ -1,14 +1,46 @@
-import { Calendar, MapPin, Clock, Hotel, Plane, MoreVertical } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { Calendar, MapPin, Clock, Hotel, Plane, Package, MoreVertical, Users } from 'lucide-react';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 
-// Mock bookings data
-const mockBookings = [
+interface SavedBooking {
+  id: string;
+  packageId: string;
+  packageName: string;
+  destination: string;
+  duration: string;
+  image: string;
+  price: number;
+  travelDate: string;
+  travelers: number;
+  bookedAt: string;
+  status: 'upcoming' | 'completed';
+}
+
+interface MockBooking {
+  id: string;
+  type: 'hotel' | 'flight' | 'package';
+  name: string;
+  location: string;
+  image: string;
+  checkIn: string;
+  checkOut: string;
+  guests: number;
+  status: 'upcoming' | 'completed';
+  price: number;
+  duration?: string;
+}
+
+const BOOKINGS_STORAGE_KEY = 'tacttrip_package_bookings';
+
+// Mock bookings data (hotels/flights)
+const mockBookings: MockBooking[] = [
   {
     id: '1',
     type: 'hotel',
@@ -33,25 +65,48 @@ const mockBookings = [
     status: 'completed',
     price: 8500,
   },
-  {
-    id: '3',
-    type: 'flight',
-    name: 'Delhi to Goa',
-    location: 'IndiGo 6E-2145',
-    image: 'https://images.unsplash.com/photo-1436491865332-7a61a109cc05?w=400&q=80',
-    checkIn: '2025-03-05',
-    checkOut: '',
-    guests: 1,
-    status: 'upcoming',
-    price: 4500,
-  },
 ];
 
 const Bookings = () => {
   const { user } = useAuth();
+  const [packageBookings, setPackageBookings] = useState<SavedBooking[]>([]);
   
-  const upcomingBookings = mockBookings.filter(b => b.status === 'upcoming');
-  const completedBookings = mockBookings.filter(b => b.status === 'completed');
+  useEffect(() => {
+    // Load package bookings from localStorage
+    const savedBookings = localStorage.getItem(BOOKINGS_STORAGE_KEY);
+    if (savedBookings) {
+      try {
+        const bookings: SavedBooking[] = JSON.parse(savedBookings);
+        // Update status based on travel date
+        const updatedBookings = bookings.map(booking => ({
+          ...booking,
+          status: new Date(booking.travelDate) > new Date() ? 'upcoming' : 'completed'
+        })) as SavedBooking[];
+        setPackageBookings(updatedBookings);
+      } catch {
+        console.error('Failed to parse bookings');
+      }
+    }
+  }, []);
+
+  // Convert package bookings to common format
+  const convertedPackageBookings: MockBooking[] = packageBookings.map(pkg => ({
+    id: pkg.id,
+    type: 'package' as const,
+    name: pkg.packageName,
+    location: pkg.destination,
+    image: pkg.image,
+    checkIn: pkg.travelDate,
+    checkOut: '',
+    guests: pkg.travelers,
+    status: pkg.status,
+    price: pkg.price,
+    duration: pkg.duration
+  }));
+
+  const allBookings = [...mockBookings, ...convertedPackageBookings];
+  const upcomingBookings = allBookings.filter(b => b.status === 'upcoming');
+  const completedBookings = allBookings.filter(b => b.status === 'completed');
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('en-IN', {
@@ -61,7 +116,16 @@ const Bookings = () => {
     });
   };
 
-  const BookingCard = ({ booking }: { booking: typeof mockBookings[0] }) => (
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case 'hotel': return <Hotel className="w-4 h-4 text-primary" />;
+      case 'flight': return <Plane className="w-4 h-4 text-primary" />;
+      case 'package': return <Package className="w-4 h-4 text-primary" />;
+      default: return <Hotel className="w-4 h-4 text-primary" />;
+    }
+  };
+
+  const BookingCard = ({ booking }: { booking: MockBooking }) => (
     <Card className="overflow-hidden border-border/50 shadow-card hover:shadow-card-hover transition-shadow">
       <div className="flex flex-col sm:flex-row">
         <div className="sm:w-40 h-32 sm:h-auto relative overflow-hidden">
@@ -79,17 +143,18 @@ const Bookings = () => {
           >
             {booking.status === 'upcoming' ? 'Upcoming' : 'Completed'}
           </Badge>
+          {booking.type === 'package' && (
+            <Badge className="absolute top-2 right-2 bg-accent text-accent-foreground">
+              Package
+            </Badge>
+          )}
         </div>
         
         <CardContent className="flex-1 p-4">
           <div className="flex items-start justify-between mb-2">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                {booking.type === 'hotel' ? (
-                  <Hotel className="w-4 h-4 text-primary" />
-                ) : (
-                  <Plane className="w-4 h-4 text-primary" />
-                )}
+                {getTypeIcon(booking.type)}
                 <h3 className="font-semibold text-foreground">{booking.name}</h3>
               </div>
               <div className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -110,12 +175,16 @@ const Bookings = () => {
                 {booking.checkOut && ` - ${formatDate(booking.checkOut)}`}
               </span>
             </div>
-            {booking.type === 'hotel' && (
+            {booking.duration && (
               <div className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                <span>{booking.guests} guests</span>
+                <span>{booking.duration}</span>
               </div>
             )}
+            <div className="flex items-center gap-1">
+              <Users className="w-3 h-3" />
+              <span>{booking.guests} {booking.type === 'package' ? 'traveler(s)' : 'guest(s)'}</span>
+            </div>
           </div>
           
           <div className="flex items-center justify-between">
@@ -176,7 +245,14 @@ const Bookings = () => {
                     <p className="text-muted-foreground text-center mb-4">
                       Start planning your next adventure!
                     </p>
-                    <Button className="gradient-hero">Plan a Trip</Button>
+                    <div className="flex gap-3">
+                      <Button asChild variant="outline">
+                        <Link to="/plan">Plan a Trip</Link>
+                      </Button>
+                      <Button asChild className="gradient-hero">
+                        <Link to="/packages">Browse Packages</Link>
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )}
